@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:webdriver/io.dart';
@@ -20,7 +21,6 @@ class GiveawayClient {
     processingGiveaways = true;
     print('Starting giveaways for $_username');
     try {
-
       _driver = await createDriver(spec: WebDriverSpec.JsonWire);
       await _driver.get('https://www.amazon.com/ap/signin?_encoding=UTF8&ignoreAuthState=1&openid.assoc_handle=usflex&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.mode=checkid_setup&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0&openid.ns.pape=http%3A%2F%2Fspecs.openid.net%2Fextensions%2Fpape%2F1.0&openid.pape.max_auth_age=0&openid.return_to=https%3A%2F%2Fwww.amazon.com%2F%3Fref_%3Dnav_signin&switch_account=');
 
@@ -46,7 +46,9 @@ class GiveawayClient {
         print(pageLinks);
         for (var attr in pageLinks) {
           try {
-            await processGiveaway(await attr);
+            _attempts = 0;
+            _href = await attr;
+            await processGiveaway();
           } catch (e) {
             print(e);
           }
@@ -58,78 +60,90 @@ class GiveawayClient {
     }
   }
 
-  Future<void> processGiveaway(String href, {int attempts = 0}) async {
+  int _attempts;
+  String _href;
+  String _id;
+
+  Future<void> processGiveaway() async {
     print('================================================');
-    var id = href.substring(6, 22);
-    if (await _db.hasCompleted(_username, id)) {
-      print('Skipping $id');
+    _id = _href.substring(6, 22);
+    if (await _db.hasCompleted(_username, _id)) {
+      print('Skipping $_id');
       return;
     }
 
-    await _driver.get('https://www.amazon.com$href');
+    await _driver.get('https://www.amazon.com$_href');
 
-    print('Processing $id');
+    print('Processing $_id');
 
     // Wait for the continue button to  load
     var title = await (await getElement(By.cssSelector('.prize-title'))).text;
     if (title.contains('you didn\'t win')) {
-      print('Already didnt win, adding it to database $id');
-      _db.addCompletedGiveaway(_username, id);
+      print('Already didnt win, adding it to database $_id');
+      _db.addCompletedGiveaway(_username, _id);
       return;
     }
 
-    if (await shouldReloadDueToError()) {
-      if (attempts > 3) {
-        print('Already gone through 3 attempts, moving on...');
-      } else {
-        print('Reloading due to error!');
-        await processGiveaway(href, attempts: attempts + 1);
-      }
-      return;
-    }
+    if (await shouldReloadDueToError()) return;
 
     // Try to play YouTube video
-    WebElement youTubeVideo = await getElement(By.cssSelector('.youtube-video'), duration: 2000);
+    WebElement youTubeVideo = await getElement(By.cssSelector('.youtube-video'), duration: 500, checkInterval: 50);
     if (youTubeVideo != null) {
       print('[VIDEO] YouTube!');
-      await processVideo(youTubeVideo, href, id, '.youtube-continue-button:not(.a-button-disabled)');
+      await processVideo(youTubeVideo, '.youtube-continue-button:not(.a-button-disabled)');
       return;
     }
 
-    var amazonVideo = await getElement(By.cssSelector('.amazon-video'), duration: 2000);
+    var amazonVideo = await getElement(By.cssSelector('.amazon-video'), duration: 500, checkInterval: 50);
     if (amazonVideo != null) {
       print('[VIDEO] Amazon!');
-      await processVideo(amazonVideo, href, id, '.amazon-video-continue-button:not(.a-button-disabled)');
+      await processVideo(amazonVideo, '.amazon-video-continue-button:not(.a-button-disabled)');
       return;
     }
-    var box = await getElement(By.className('box-click-area'));
+    var box = await getElement(By.className('box-click-area'), duration: 500, checkInterval: 50);
     if (box != null) {
       await box.click();
       print('[CLICK] No entry requirement!');
-      processTitle(await waitForTitleChange(), href);
-      _db.addCompletedGiveaway(_username, id);
+      processTitle(await waitForTitleChange());
+      _db.addCompletedGiveaway(_username, _id);
       return;
     }
 
-    var followAmazonPerson = await getElement(By.className('follow-author-continue-button'));
+    var followAmazonPerson = await getElement(By.className('follow-author-continue-button'), duration: 500, checkInterval: 50);
     if (followAmazonPerson != null) {
       print('[CLICK] Follow author!');
       await followAmazonPerson.click();
-      processTitle(await waitForTitleChange(), href);
-      _db.addCompletedGiveaway(_username, id);
+      processTitle(await waitForTitleChange());
+      _db.addCompletedGiveaway(_username, _id);
       return;
     }
   }
 
+  // Returns if the processGiveaway should be returned
   Future<bool> shouldReloadDueToError() async {
-    if (await (await _driver.findElements(By.className('a-alert-content'))).length > 0) return true;
-    if (await (await _driver.findElements(By.cssSelector('a[href*=\'mobilephone\']'))).length > 0) return true;
-    var extraLarge = await _driver.findElements(By.className('a-size-extra-large'));
-    if (await extraLarge.length > 0 && (await (await extraLarge.first).text).contains('Giveaway ended')) return true;
-    return false;
+    bool result = false;
+    await Future.delayed(Duration(seconds: 1), () async {
+      var extraLarge = await _driver.findElements(
+          By.className('a-size-extra-large'));
+      if (await extraLarge.length > 0 &&
+          (await (await extraLarge.first).text).contains('Giveaway ended') ||
+          await (await _driver.findElements(By.className('a-alert-content'))).length > 0 ||
+          await (await _driver.findElements(By.className('participation-issue'))).length > 0 ||
+          await (await _driver.findElements(By.cssSelector('a[href*=\'mobilephone\']'))).length > 0) {
+        if (_attempts > 3) {
+          print('Already gone through 3 attempts, moving on...');
+        } else {
+          print('Reloading due to error!');
+          _attempts++;
+          await processGiveaway();
+        }
+        result = true;
+      }
+    });
+    return result;
   }
 
-  Future<void> processVideo(WebElement video, String url, String id, String buttonSelector) async {
+  Future<void> processVideo(WebElement video, String buttonSelector) async {
     await video.click();
     sleep(Duration(milliseconds: 500));
     await video.click();
@@ -141,11 +155,11 @@ class GiveawayClient {
     await continueButton.click();
     await continueButton.click();
 
-    var newText = await waitForTitleChange();
+    if (await shouldReloadDueToError()) return;
 
-    await processTitle(newText, url);
+    processTitle(await waitForTitleChange());
 
-    _db.addCompletedGiveaway(_username, id);
+    _db.addCompletedGiveaway(_username, _id);
   }
 
   Future<String> waitForTitleChange() async {
@@ -157,11 +171,12 @@ class GiveawayClient {
     return await titleElement.text;
   }
 
-  void processTitle(String title, String url) {
+  // Returns if successful
+  void processTitle(String title) {
     if (title.contains('didn\'t win')) {
       print('Didn\'t win');
     } else if (title.contains('you won!')) {
-      print('YOU WON!!!!!!!!!!!    $url');
+      print('YOU WON!!!!!!!!!!!    $_href');
       sleep(Duration(days: 3));
       exit(0);
     }
