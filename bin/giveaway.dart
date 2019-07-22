@@ -6,10 +6,12 @@ import 'package:webdriver/support/forwarder.dart';
 
 import 'database.dart';
 
+Function consolePrint = print;
 class GiveawayClient {
 
   String _username;
   String _password;
+  String _consoleUser;
   bool processingGiveaways = false;
   WebDriver _driver;
   int totalPages = -1;
@@ -20,6 +22,7 @@ class GiveawayClient {
   Future start() async {
     processingGiveaways = true;
     print('Starting giveaways for $_username');
+    _consoleUser =_username.split('@')[0];
     try {
       _driver = await createDriver(spec: WebDriverSpec.JsonWire);
       await _driver.get('https://www.amazon.com/ap/signin?_encoding=UTF8&ignoreAuthState=1&openid.assoc_handle=usflex&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.mode=checkid_setup&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0&openid.ns.pape=http%3A%2F%2Fspecs.openid.net%2Fextensions%2Fpape%2F1.0&openid.pape.max_auth_age=0&openid.return_to=https%3A%2F%2Fwww.amazon.com%2F%3Fref_%3Dnav_signin&switch_account=');
@@ -42,6 +45,7 @@ class GiveawayClient {
         print('Going to page $page');
 
         await getElement(By.className('listing-info-container'), duration: 5000);
+        print('After info listy container');
         var pageLinks = await _driver.findElements(By.cssSelector('.item-link[href^="/ga/p/"]')).map((element) => element.attributes['href']).toList();
         print(pageLinks);
         for (var attr in pageLinks) {
@@ -103,6 +107,7 @@ class GiveawayClient {
     var box = await getElement(By.className('box-click-area'), duration: 500, checkInterval: 50);
     if (box != null) {
       await box.click();
+      if (await shouldReloadDueToError()) return;
       print('[CLICK] No entry requirement!');
       processTitle(await waitForTitleChange());
       _db.addCompletedGiveaway(_username, _id);
@@ -113,6 +118,7 @@ class GiveawayClient {
     if (followAmazonPerson != null) {
       print('[CLICK] Follow author!');
       await followAmazonPerson.click();
+      if (await shouldReloadDueToError()) return;
       processTitle(await waitForTitleChange());
       _db.addCompletedGiveaway(_username, _id);
       return;
@@ -165,8 +171,11 @@ class GiveawayClient {
   Future<String> waitForTitleChange() async {
     var titleElement = await _driver.findElement(By.className('prize-title'));
     var original = await titleElement.text;
+    int duration = 8000;
     while ((await titleElement.text) == original) {
       sleep(Duration(milliseconds: 250));
+      duration -= 250;
+      if (duration <= 0) return 'didn\'t win';
     }
     return await titleElement.text;
   }
@@ -193,5 +202,9 @@ class GiveawayClient {
       duration -= checkInterval;
     } while (element == null && duration > 0);
     return element;
+  }
+
+  void print(Object object) {
+    consolePrint("[$_consoleUser] $object");
   }
 }

@@ -10,6 +10,7 @@ import 'package:yaml/yaml.dart';
 
 import 'database.dart';
 import 'giveaway.dart';
+import 'package:process_run/process_run.dart';
 
 DatabaseManager _databaseManager;
 List<GiveawayClient> _clients = [];
@@ -17,6 +18,7 @@ List<GiveawayClient> _clients = [];
 main(List<String> args) async {
   var parser = ArgParser()
     ..addOption('clients', abbr: 'c', help: 'The amount of clients to run, 0 being all', defaultsTo: '0')
+    ..addOption('index', abbr: 'i', help: 'The starting index of the accounts in the config', defaultsTo: '0')
     ..addOption('config', abbr: 'f', help: 'The config file relative to the current path', defaultsTo: 'config.json')
     ..addOption('username', abbr: 'u', help: 'The username of the single account to use.')
     ..addOption('password', abbr: 'p', help: 'The password of the single account to use.');
@@ -35,7 +37,23 @@ main(List<String> args) async {
   } else {
     List<dynamic> configAccounts = json['accounts'];
     int taking = int.parse(result['clients']);
-    configAccounts.take(taking == 0 ? configAccounts.length : taking).forEach((account) => accounts[account['username']] = account['password']);
+    int starting = int.parse(result['index']);
+    configAccounts.skip(starting).take(taking == 0 ? configAccounts.length : taking).forEach((account) => accounts[account['username']] = account['password']);
+
+    var futures = <Future>[];
+    for (var user in accounts.keys) {
+      var pass = accounts[user];
+      var command = <String>[r'E:\AmazonGiveaway\bin\main.dart', '-f', "E:\\AmazonGiveaway\\${result['config']}", '-u', user, '-p', pass];
+      print('Running dart ${command.join(' ')}');
+      futures.add(run(r'C:\Program Files\Dart\dart-sdk\bin\dart.exe', command, verbose: true).then((process) {
+        print('Done with $user');
+      }));
+    }
+
+    await Future.wait(futures);
+    print('Futures have completed');
+
+    return;
   }
 
   print('Accounts are:');
