@@ -45,9 +45,7 @@ class GiveawayClient {
         print('Going to page $page');
 
         await getElement(By.className('listing-info-container'), duration: 5000);
-        print('After info listy container');
         var pageLinks = await _driver.findElements(By.cssSelector('.item-link[href^="/ga/p/"]')).map((element) => element.attributes['href']).toList();
-        print(pageLinks);
         for (var attr in pageLinks) {
           try {
             _attempts = 0;
@@ -69,7 +67,7 @@ class GiveawayClient {
   String _id;
 
   Future<void> processGiveaway() async {
-    print('================================================');
+    print('========================= [Processing $_id] =========================');
     _id = _href.substring(6, 22);
     if (await _db.hasCompleted(_username, _id)) {
       print('Skipping $_id');
@@ -77,8 +75,6 @@ class GiveawayClient {
     }
 
     await _driver.get('https://www.amazon.com$_href');
-
-    print('Processing $_id');
 
     // Wait for the continue button to  load
     var title = await (await getElement(By.cssSelector('.prize-title'))).text;
@@ -136,8 +132,8 @@ class GiveawayClient {
           await (await _driver.findElements(By.className('a-alert-content'))).length > 0 ||
           await (await _driver.findElements(By.className('participation-issue'))).length > 0 ||
           await (await _driver.findElements(By.cssSelector('a[href*=\'mobilephone\']'))).length > 0) {
-        if (_attempts > 3) {
-          print('Already gone through 3 attempts, moving on...');
+        if (_attempts > 5) {
+          print('Already gone through 5 attempts, moving on...');
         } else {
           print('Reloading due to error!');
           _attempts++;
@@ -169,7 +165,7 @@ class GiveawayClient {
   }
 
   Future<String> waitForTitleChange() async {
-    var titleElement = await _driver.findElement(By.className('prize-title'));
+    var titleElement = await _driver.findElement(By.cssSelector('div.a-section.a-spacing-medium.a-text-left > span'));
     var original = await titleElement.text;
     int duration = 8000;
     while ((await titleElement.text) == original) {
