@@ -11,8 +11,6 @@ import 'package:yaml/yaml.dart';
 import 'database.dart';
 import 'giveaway.dart';
 
-//WebDriver driver = createDriver(...);
-
 DatabaseManager _databaseManager;
 List<GiveawayClient> _clients = [];
 
@@ -49,12 +47,13 @@ main(List<String> args) async {
   _databaseManager = DatabaseManager();
   _databaseManager.initDatabase(db['host'], db['port'], db['username'], db['password'], db['database']);
 
-  accounts.forEach((user, pass) => _clients.add(GiveawayClient(user, pass)..start()));
+  accounts.forEach((user, pass) => _clients.add(GiveawayClient(user, pass, _databaseManager)..start()));
 
   Timer.periodic(Duration(seconds: 3), (_t) {
     if (_clients.where((client) => client.processingGiveaways).isEmpty) {
       print('All clients have stopped!');
       _t.cancel();
+      _databaseManager.conn.close();
       exit(0);
     }
   });

@@ -21,7 +21,7 @@ class DatabaseManager {
   }
 
   void addCompletedGiveaway(String username, String giveaway) {
-    conn.query('INSERT INTO `CompletedGiveaways` VALUES (\'$username\', \'$giveaway\';');
+    conn.query('INSERT INTO `CompletedGiveaways` VALUES (\'$username\', \'$giveaway\');');
   }
 
   Future<bool> hasCompleted(String username, String giveaway) async {
