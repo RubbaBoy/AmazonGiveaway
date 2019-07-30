@@ -13,3 +13,5 @@ doc/api/
 *.iml
 .idea/
 config.json
+*.exe
+shit.dart
