@@ -1,39 +1,58 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:webdriver/io.dart';
-import 'package:webdriver/support/forwarder.dart';
 
 import 'database.dart';
+import 'notifications.dart';
 
 Function consolePrint = print;
 class GiveawayClient {
 
+  static const bool VERBOSE = true;
+
+  String _host;
   String _username;
   String _password;
+  String _cookies;
   String _consoleUser;
   bool processingGiveaways = false;
   WebDriver _driver;
   int totalPages = -1;
   DatabaseManager _db;
+  Notifications notifications;
 
-  GiveawayClient(this._username, this._password, this._db);
+  GiveawayClient(this._host, this._username, this._password, this._cookies, this._db);
 
-  Future start() async {
+  Future<void> start() async {
     processingGiveaways = true;
-    print('Starting giveaways for $_username');
+    print('Starting giveaways for $_username', true);
     _consoleUser =_username.split('@')[0];
     try {
-      _driver = await createDriver(spec: WebDriverSpec.JsonWire);
-      await _driver.get('https://www.amazon.com/ap/signin?_encoding=UTF8&ignoreAuthState=1&openid.assoc_handle=usflex&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.mode=checkid_setup&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0&openid.ns.pape=http%3A%2F%2Fspecs.openid.net%2Fextensions%2Fpape%2F1.0&openid.pape.max_auth_age=0&openid.return_to=https%3A%2F%2Fwww.amazon.com%2F%3Fref_%3Dnav_signin&switch_account=');
+      _driver = await createDriver(uri: Uri.parse('http://$_host:42069/selenium/'), spec: WebDriverSpec.JsonWire, desired: {'chromeOptions': {
+        'args': ['--headless', '--no-sandbox', '--disable-dev-shm-usage']
+      }});
 
-      var email = await getElement(By.cssSelector('input[type=email]'));
-      await email.sendKeys(_username);
+      if (this._cookies != null) {
+        await _driver.get('https://amazon.com/');
 
-      var pass = await getElement(By.cssSelector('input[type=password]'));
-      await pass.sendKeys(_password);
+        var cookies = jsonDecode(this._cookies);
+        cookies.forEach((cookie) =>
+            _driver.cookies.add(Cookie.fromJson(cookie)));
+      } else {
+        await _driver.get('https://www.amazon.com/ap/signin?_encoding=UTF8&ignoreAuthState=1&openid.assoc_handle=usflex&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.mode=checkid_setup&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0&openid.ns.pape=http%3A%2F%2Fspecs.openid.net%2Fextensions%2Fpape%2F1.0&openid.pape.max_auth_age=0&openid.return_to=https%3A%2F%2Fwww.amazon.com%2F%3Fref_%3Dnav_signin&switch_account=');
 
-      await (await getElement(By.id('signInSubmit'))).click();
+        var email = await getElement(By.cssSelector('input[type=email]'));
+        await email.sendKeys(_username);
+
+        var pass = await getElement(By.cssSelector('input[type=password]'));
+        await pass.sendKeys(_password);
+
+        await (await getElement(By.id('signInSubmit'))).click();
+      }
+
+      sleep(Duration(seconds: 1));
 
       await _driver.get('https://www.amazon.com/ga/giveaways/?pageId=1');
 
@@ -52,12 +71,12 @@ class GiveawayClient {
             _href = await attr;
             await processGiveaway();
           } catch (e) {
-            print(e);
+            print(e, true);
           }
         }
       }
     } catch (e) {
-      print(e);
+      print(e, true);
       processingGiveaways = false;
     }
   }
@@ -114,6 +133,8 @@ class GiveawayClient {
     if (followAmazonPerson != null) {
       print('[CLICK] Follow author!');
       await followAmazonPerson.click();
+      sleep(Duration(milliseconds: 500));
+      await followAmazonPerson.click();
       if (await shouldReloadDueToError()) return;
       processTitle(await waitForTitleChange());
       _db.addCompletedGiveaway(_username, _id);
@@ -133,7 +154,7 @@ class GiveawayClient {
           await (await _driver.findElements(By.className('participation-issue'))).length > 0 ||
           await (await _driver.findElements(By.cssSelector('a[href*=\'mobilephone\']'))).length > 0) {
         if (_attempts > 5) {
-          print('Already gone through 5 attempts, moving on...');
+          print('Already gone through 5 attempts, moving on...', true);
         } else {
           print('Reloading due to error!');
           _attempts++;
@@ -179,9 +200,11 @@ class GiveawayClient {
   // Returns if successful
   void processTitle(String title) {
     if (title.contains('didn\'t win')) {
-      print('Didn\'t win');
+      print('Didn\'t win', true);
     } else if (title.contains('you won!')) {
-      print('YOU WON!!!!!!!!!!!    $_href');
+      print('YOU WON!!!!!!!!!!!    $_href', true);
+      File('winners.txt').writeAsStringSync('[${DateTime.now().toIso8601String()}] $_username:$_password > $_href', mode: FileMode.append);
+      notifications.sendNotification('You won!', 'The account $_username won a giveaway. This has been logged.');
       sleep(Duration(days: 3));
       exit(0);
     }
@@ -200,7 +223,7 @@ class GiveawayClient {
     return element;
   }
 
-  void print(Object object) {
-    consolePrint("[$_consoleUser] $object");
+  void print(Object object, [important = false]) {
+    if (VERBOSE || important) consolePrint("[$_consoleUser] $object");
   }
 }
